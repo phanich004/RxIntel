@@ -33,12 +33,12 @@ import pickle
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent))
-from parse_drugbank import (  # type: ignore[import-not-found]
+from parse_drugbank import (
     ALLOWED_GROUPS_DEFAULT,
     T,
     drug_groups,
@@ -108,7 +108,7 @@ def normalize(s: str) -> str:
     return " ".join(tokens)
 
 
-def collect_names(drug_elem) -> List[str]:
+def collect_names(drug_elem: Any) -> List[str]:
     """Return primary name, synonyms, and deduped product brand names."""
     out: List[str] = []
 
