@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import get_args
 
 import pytest
@@ -100,3 +101,63 @@ def test_critic_output_validates_ranges_and_defaults() -> None:
             completeness_score=0.7,
             composite=1.01,
         )
+
+
+def test_router_output_excludes_none_fields() -> None:
+    r = RouterOutput(mode="ddi_check", confidence=0.98)
+    dumped = json.loads(r.model_dump_json())
+    assert "graph_filter" not in dumped
+    assert "semantic_constraint" not in dumped
+    assert dumped == {"mode": "ddi_check", "confidence": 0.98}
+
+    populated = RouterOutput(
+        mode="hybrid",
+        confidence=0.9,
+        graph_filter={"enzyme": "CYP3A4", "action": "inhibitor"},
+        semantic_constraint="interacts with statins",
+    )
+    dumped = json.loads(populated.model_dump_json())
+    assert dumped["graph_filter"] == {"enzyme": "CYP3A4", "action": "inhibitor"}
+    assert dumped["semantic_constraint"] == "interacts with statins"
+
+
+def test_reasoning_output_exclude_none_preserves_empty_collections() -> None:
+    """Only None gets stripped; empty lists and empty strings must survive
+    so downstream consumers can rely on stable field presence."""
+    r = ReasoningOutput(
+        mode="describe",
+        mechanism="competitive inhibition of vitamin K epoxide reductase",
+        recommendation="monitor INR",
+        confidence=0.8,
+        sources=["DB00682"],
+    )
+    dumped = json.loads(r.model_dump_json())
+    assert dumped["severity"] == "n/a"
+    assert dumped["interacting_pairs"] == []
+    assert dumped["candidates"] == []
+    assert dumped["summary"] == ""
+    assert dumped["insufficient_evidence"] is False
+
+
+def test_critic_output_excludes_none_fields() -> None:
+    c = CriticOutput(
+        approved=True,
+        factual_accuracy=0.9,
+        safety_score=0.85,
+        completeness_score=0.7,
+        composite=0.85,
+    )
+    dumped = json.loads(c.model_dump_json())
+    # Required bool/float fields remain; issues=[] and revision_prompt=""
+    # are non-None defaults so they must still serialize.
+    assert dumped["issues"] == []
+    assert dumped["revision_prompt"] == ""
+    assert "approved" in dumped
+
+
+def test_exclude_none_opt_out_still_works() -> None:
+    """Callers can force the null-bearing form by passing exclude_none=False."""
+    r = RouterOutput(mode="ddi_check", confidence=0.98)
+    dumped = json.loads(r.model_dump_json(exclude_none=False))
+    assert dumped["graph_filter"] is None
+    assert dumped["semantic_constraint"] is None

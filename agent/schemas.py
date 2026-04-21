@@ -14,6 +14,24 @@ from pydantic import BaseModel, Field
 Mode = Literal["ddi_check", "alternatives", "hybrid", "describe", "polypharmacy"]
 
 
+class _ExcludeNoneModel(BaseModel):
+    """Base for pipeline output models: serialization drops None fields.
+
+    ``ConfigDict(exclude_none=True)`` is NOT a real Pydantic V2 config
+    key — it's silently ignored — so we override the serializers instead.
+    Callers can still pass ``exclude_none=False`` explicitly if they need
+    the null-bearing form.
+    """
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(**kwargs)
+
+    def model_dump_json(self, **kwargs: Any) -> str:
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump_json(**kwargs)
+
+
 class AgentState(TypedDict, total=False):
     """LangGraph channel state threaded through every node.
 
@@ -38,7 +56,7 @@ class AgentState(TypedDict, total=False):
     escalated: bool
 
 
-class RouterOutput(BaseModel):
+class RouterOutput(_ExcludeNoneModel):
     """Structured output emitted by the query_router node."""
 
     mode: Mode
@@ -47,7 +65,7 @@ class RouterOutput(BaseModel):
     semantic_constraint: str | None = None
 
 
-class ReasoningOutput(BaseModel):
+class ReasoningOutput(_ExcludeNoneModel):
     """Structured output emitted by the reasoning_agent node.
 
     ``severity="unknown"`` plus ``insufficient_evidence=True`` is the
@@ -67,7 +85,7 @@ class ReasoningOutput(BaseModel):
     sources: list[str]
 
 
-class CriticOutput(BaseModel):
+class CriticOutput(_ExcludeNoneModel):
     """Structured output emitted by the critic_agent node.
 
     Composite uses the CLAUDE.md weights (0.50 / 0.35 / 0.15); the model
