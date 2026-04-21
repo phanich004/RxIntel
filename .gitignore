@@ -1,0 +1,47 @@
+# DrugBank source data — academic license prohibits redistribution
+data/
+*.xml
+*.xml.zip
+*.xml.gz
+
+# DrugBank-derived artifacts (also covered by license)
+chroma_db/
+gazetteer.pkl
+*.pkl
+etl/out/
+*.jsonl
+
+# Environment / secrets
+.env
+.env.local
+*.secret
+
+# MLflow runs (may contain query traces with drug data)
+mlruns/
+
+# Standard Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenv
+venv/
+.venv/
+
+# IDE / Claude Code project context (local-only)
+.vscode/
+.idea/
+.claude/
+CLAUDE.md
+CLAUDE_CODE_MASTER_PROMPT.md
+CLAUDE_CODE_STEP_PROMPTS.md
+
+# OS
+.DS_Store
+Thumbs.db
