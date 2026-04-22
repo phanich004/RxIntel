@@ -25,7 +25,85 @@ services:
       retries: 12
       start_period: 30s
 
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.15.0
+    container_name: rxintel-mlflow
+    restart: unless-stopped
+    ports:
+      # Host-side 5001 because macOS AirPlay Receiver (ControlCenter)
+      # squats on 5000. Container port stays 5000 so the in-network
+      # MLFLOW_TRACKING_URI (http://mlflow:5000) is unaffected.
+      - "5001:5000"
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:////mlflow-db/mlflow.db
+      --default-artifact-root /mlflow-artifacts
+      --host 0.0.0.0
+      --port 5000
+    volumes:
+      - mlflow_db:/mlflow-db
+      - mlflow_artifacts:/mlflow-artifacts
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: rxintel-api
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      # Override anything in .env that pointed to localhost — inside the
+      # compose network we reach peers by service name.
+      NEO4J_URI: "bolt://neo4j:7687"
+      MLFLOW_TRACKING_URI: "http://mlflow:5000"
+      VERSION: "0.1"
+      # DEMO_MODE is opt-in: a deploy operator flips it in .env after
+      # running `python -m scripts.seed_demo` on the host.
+      DEMO_MODE: "${DEMO_MODE:-false}"
+      DEMO_RESPONSES_PATH: "/app/demo_responses.json"
+    volumes:
+      # Chroma needs RW for its WAL even on read-only queries.
+      - ./chroma_db:/app/chroma_db
+      # Gazetteer pickles are host-generated ETL artifacts, too large
+      # to bake into the image.
+      - ./gazetteer.pkl:/app/gazetteer.pkl:ro
+      - ./gazetteer_fuzzy.pkl:/app/gazetteer_fuzzy.pkl:ro
+      # demo_responses.json is COPY'd into the image at build time, not
+      # mounted here — an absent host file would otherwise become an
+      # empty directory inside the container and break the JSON read.
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: rxintel-streamlit
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: "http://api:8000"
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   neo4j_data:
   neo4j_logs:
   neo4j_plugins:
+  mlflow_db:
+  mlflow_artifacts:

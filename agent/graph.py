@@ -264,20 +264,37 @@ def _mlflow_run_or_fallback(
 ) -> Iterator[_MLflowTracker | _LocalFileTracker]:
     """Yield an MLflow-backed tracker when possible, local JSON otherwise.
 
-    We intentionally swallow every exception from the MLflow import and
-    start_run path: tracking failures must not break the pipeline.
+    The try/except covers ONLY the mlflow setup phase. Once we've yielded
+    (either an MLflowTracker or the local fallback), exceptions in the
+    caller's with block propagate normally — we don't swallow them here.
+    Previous version caught body exceptions in the outer except, then
+    yielded a second time, producing an opaque "generator didn't stop
+    after throw()" that masked every pipeline error.
     """
+    mlflow_ctx: Any = None
+    mlflow_tracker: _MLflowTracker | None = None
     try:
         import mlflow
-
-        with mlflow.start_run(run_name=run_name):
-            yield _MLflowTracker(mlflow)
-            return
-    except Exception as exc:  # mlflow unreachable, not installed, etc.
+        mlflow_ctx = mlflow.start_run(run_name=run_name)
+        mlflow_ctx.__enter__()
+        mlflow_tracker = _MLflowTracker(mlflow)
+    except Exception as exc:
         logger.warning(
             "MLflow unavailable (%s); falling back to local JSON trace", exc
         )
+        mlflow_ctx = None
 
+    if mlflow_ctx is not None and mlflow_tracker is not None:
+        try:
+            yield mlflow_tracker
+        finally:
+            try:
+                mlflow_ctx.__exit__(None, None, None)
+            except Exception as exc:
+                logger.warning("MLflow end_run failed: %s", exc)
+        return
+
+    # Fallback path: local JSON file tracker.
     path = _LOCAL_TRACE_DIR / f"{int(time.time() * 1000)}.json"
     tracker = _LocalFileTracker(path)
     try:

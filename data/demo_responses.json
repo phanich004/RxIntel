@@ -1,0 +1,59 @@
+{
+  "Is warfarin safe with aspirin?": {
+    "query": "Is warfarin safe with aspirin?",
+    "mode": "ddi_check",
+    "resolved_drugs": [
+      {"drug_id": "DB00682", "drug_name": "Warfarin"},
+      {"drug_id": "DB00945", "drug_name": "Aspirin"}
+    ],
+    "graph_results": [],
+    "vector_results": [],
+    "fused_results": [],
+    "reasoning_output": {
+      "mode": "ddi_check",
+      "severity": "Moderate",
+      "interacting_pairs": [{
+        "drug_a": "Warfarin (DB00682)",
+        "drug_b": "Aspirin (DB00945)",
+        "severity": "Moderate",
+        "rationale": "Aspirin may increase the anticoagulant activities of Warfarin."
+      }],
+      "candidates": [],
+      "summary": "",
+      "mechanism": "Pharmacodynamic interaction: Aspirin's antiplatelet effect compounds Warfarin's anticoagulant effect, increasing bleeding risk.",
+      "recommendation": "Monitor INR weekly.",
+      "confidence": 1.0,
+      "insufficient_evidence": false,
+      "sources": ["DB00682", "DB00945"]
+    },
+    "critic_score": {
+      "approved": true,
+      "factual_accuracy": 1.0,
+      "safety_score": 1.0,
+      "completeness_score": 1.0,
+      "composite": 1.0,
+      "issues": [],
+      "revision_prompt": ""
+    },
+    "retry_count": 0,
+    "escalated": false,
+    "final_output": {
+      "mode": "ddi_check",
+      "severity": "Moderate",
+      "interacting_pairs": [{
+        "drug_a": "Warfarin (DB00682)",
+        "drug_b": "Aspirin (DB00945)",
+        "severity": "Moderate",
+        "rationale": "Aspirin may increase the anticoagulant activities of Warfarin."
+      }],
+      "candidates": [],
+      "summary": "",
+      "mechanism": "Pharmacodynamic interaction: Aspirin's antiplatelet effect compounds Warfarin's anticoagulant effect, increasing bleeding risk.",
+      "recommendation": "Monitor INR weekly.",
+      "confidence": 1.0,
+      "insufficient_evidence": false,
+      "sources": ["DB00682", "DB00945"],
+      "escalated": false
+    }
+  }
+}

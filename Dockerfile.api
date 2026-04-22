@@ -1,0 +1,77 @@
+# Multi-stage build for the RxIntel API container.
+#
+# Stage 1 (builder): install CPU-only torch first, then the rest of
+# requirements.txt. Pinning torch==2.4.0+cpu up-front avoids pulling
+# the ~2GB CUDA wheels that sentence-transformers would otherwise
+# transitively drag in. Final image lands ~850-950MB per the 1GB
+# relaxed budget.
+#
+# Stage 2 (runtime): python:3.11-slim with only the installed
+# site-packages + application code copied in. No build toolchain,
+# no git, no wheel cache.
+
+FROM python:3.11-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# build-essential is needed for some pyproject-backed wheels (chromadb
+# builds, rapidfuzz occasionally). Stripped from the runtime image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# CPU-only torch family pinned BEFORE the general requirements install
+# so pip uses these pre-resolved wheels instead of the default index.
+RUN pip install \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.4.0+cpu torchvision==0.19.0+cpu torchaudio==2.4.0+cpu
+
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
+
+# Install the project itself as a flat copy — no editable mode.
+COPY agent/ ./agent/
+COPY api/ ./api/
+COPY etl/ ./etl/
+COPY scripts/ ./scripts/
+
+
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TOKENIZERS_PARALLELISM=false \
+    PYTHONPATH=/app
+
+# libgomp1 is needed at runtime by faiss-cpu / torch CPU kernels.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /usr/local/lib/python3.11/site-packages \
+                    /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /build/agent   /app/agent
+COPY --from=builder /build/api     /app/api
+COPY --from=builder /build/etl     /app/etl
+COPY --from=builder /build/scripts /app/scripts
+
+# Demo-mode seed file. Baked into the image rather than volume-mounted
+# because an absent host file would become an empty directory inside
+# the container. Default is "{}"; a deploy operator regenerates real
+# content by running ``python -m scripts.seed_demo`` on the host and
+# rebuilding the image before enabling DEMO_MODE=true.
+COPY data/demo_responses.json /app/demo_responses.json
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

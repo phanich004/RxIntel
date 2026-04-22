@@ -1,5 +1,12 @@
-# DrugBank source data — academic license prohibits redistribution
-data/
+# DrugBank source data — academic license prohibits redistribution.
+# We ignore data/ contents rather than the directory itself so the
+# !exceptions below can re-include specific small artifacts.
+/data/*
+!/data/.gitkeep
+# Exception — tracked because it's COPY'd into the image build
+# (see Dockerfile.api). Placeholder ``{}`` is committed; real content
+# is regenerated via ``python -m scripts.seed_demo`` pre-deploy.
+!/data/demo_responses.json
 *.xml
 *.xml.zip
 *.xml.gz

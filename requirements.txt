@@ -12,6 +12,7 @@ tqdm>=4.66
 pydantic>=2,<3
 fastapi>=0.115
 uvicorn[standard]>=0.30
+slowapi>=0.1.9
 streamlit>=1.38
 mlflow>=2.15
 tenacity>=9

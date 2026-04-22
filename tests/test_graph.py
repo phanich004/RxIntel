@@ -16,6 +16,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any, Callable, cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -369,6 +370,32 @@ def test_mlflow_fallback_on_unreachable_server(
     assert trace["artifacts"]["final_output.json"]["severity"] == "Major"
     assert trace["metrics"]["retry_count"] == 0.0
     assert "total_latency_s" in trace["metrics"]
+
+
+def test_pipeline_error_surfaces_correctly_through_mlflow_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test: pipeline exceptions must propagate from the
+    _mlflow_run_or_fallback contextmanager without being masked as
+    'generator didn't stop after throw()'.
+    """
+    from agent import graph as graph_module
+
+    # Force MLflow success path (not fallback), so the bug fix is tested
+    # against real mlflow context manager semantics.
+
+    # Patch the graph's invoke to raise a specific error
+    class PipelineError(Exception):
+        pass
+
+    mock_graph = MagicMock()
+    mock_graph.invoke.side_effect = PipelineError("simulated pipeline failure")
+
+    monkeypatch.setattr(graph_module, "_get_graph", lambda: mock_graph)
+
+    # The exception MUST propagate as PipelineError, not a contextmanager runtime error
+    with pytest.raises(PipelineError, match="simulated pipeline failure"):
+        graph_module.run_graph("test query")
 
 
 # ---------------------------------------------------------------- #

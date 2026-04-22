@@ -1,0 +1,56 @@
+# Host-only artifacts — keep these out of the build context to keep
+# image layers small and the build cache warm.
+
+# Giant source data (licensed; not redistributable anyway).
+data/full_database.xml
+data/*.xml
+data/*.xml.gz
+
+# Heavy generated artifacts are mounted at runtime, not baked in.
+chroma_db/
+mlruns/
+*.log
+*.json.bak
+
+# Secrets
+.env
+.env.local
+*.secret
+
+# Python build cruft
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenvs
+venv/
+.venv/
+env/
+
+# Git / IDE
+.git/
+.github/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+
+# Local-only docs / notebooks
+notebooks/
+*.ipynb
+*.ipynb_checkpoints
+
+# Tests (not needed in runtime image)
+tests/
+
+# Editor scratch
+*.swp
+*.swo
+
+# data/demo_responses.json IS intentionally included in the build
+# context — it's COPY'd into the image (see Dockerfile.api). A real
+# deploy regenerates it via ``python -m scripts.seed_demo`` and
+# rebuilds before flipping DEMO_MODE=true.
