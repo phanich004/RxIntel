@@ -376,7 +376,13 @@ def test_mlflow_fallback_on_unreachable_server(
 # ---------------------------------------------------------------- #
 @pytest.mark.skip(reason="live end-to-end — run manually with real Neo4j/Chroma/Groq")
 def test_live_end_to_end_warfarin_aspirin() -> None:
-    """Real pipeline: expect Major/Moderate DDI, approved on first or second try."""
+    """Real pipeline: expect Major/Moderate DDI, approved on first or second try.
+
+    The verbose print block below only runs when the decorator is
+    stripped for a manual run — in CI / default test runs it's skipped
+    and the prints never fire. Kept in the function body so future
+    manual runs get the same debug surface without having to re-type it.
+    """
     t0 = time.perf_counter()
     result = run_graph("Is warfarin safe with aspirin?")
     elapsed = time.perf_counter() - t0
@@ -386,3 +392,22 @@ def test_live_end_to_end_warfarin_aspirin() -> None:
     assert result["critic_score"]["approved"] is True
     assert result["retry_count"] <= 1
     assert elapsed < 15.0
+
+    import json as _json
+
+    print("\n====== END-TO-END LIVE RESULT ======")
+    print("Query: 'Is warfarin safe with aspirin?'")
+    print(f"Mode: {result['mode']}")
+    print(f"Severity: {result['final_output'].get('severity')}")
+    print(f"Approved: {result['critic_score'].get('approved')}")
+    print(f"Retry count: {result['retry_count']}")
+    print(f"Total latency (s): {elapsed:.3f}")
+    print(
+        f"Resolved drugs: "
+        f"{[r.get('drug_id') for r in result.get('resolved_drugs', [])]}"
+    )
+    print("\nFinal output:")
+    print(_json.dumps(result["final_output"], indent=2))
+    print("\nCritic score breakdown:")
+    print(_json.dumps(result["critic_score"], indent=2))
+    print("====================================")
