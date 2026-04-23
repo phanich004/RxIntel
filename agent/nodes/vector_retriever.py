@@ -38,6 +38,12 @@ logger = logging.getLogger(__name__)
 _EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 _TOP_K_PER_COLLECTION = 5
 _TOP_K_HYBRID = 10
+# Alternatives over-retrieves and post-filters to approved-only. DrugBank
+# ships many one-sentence "Investigated for use/treatment in X." stubs
+# tagged groups=investigational; these rank unreasonably well on keyword
+# cosine (short chunk, one dense term) and crowd out clinically-indicated
+# approved drugs. Query K=20, drop investigational-only rows, keep 5.
+_TOP_K_ALT_RAW = 20
 
 ALTERNATIVES_COLLECTIONS: tuple[str, ...] = ("indications", "contraindications")
 DESCRIBE_COLLECTIONS: tuple[str, ...] = (
@@ -122,10 +128,16 @@ def _query_one(
                 "text": doc,
                 "cosine": 1.0 - float(dist),
                 "chunk_index": int(meta.get("chunk_index", 0)),
+                "groups": str(meta.get("groups", "")),
                 "query_type": "vector",
             }
         )
     return rows
+
+
+def _is_approved(row: dict[str, Any]) -> bool:
+    """True when the row's drug is in DrugBank's ``approved`` group."""
+    return "approved" in (row.get("groups") or "").lower()
 
 
 def _dedupe_by_drug(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -190,7 +202,9 @@ def vector_retriever(state: AgentState) -> AgentState:
             return {"vector_results": []}
         rows: list[dict[str, Any]] = []
         for coll in ALTERNATIVES_COLLECTIONS:
-            rows.extend(_query_one(coll, qtext, _TOP_K_PER_COLLECTION))
+            raw = _query_one(coll, qtext, _TOP_K_ALT_RAW)
+            approved = [r for r in raw if _is_approved(r)]
+            rows.extend(approved[:_TOP_K_PER_COLLECTION])
         return {"vector_results": _dedupe_by_drug(rows)}
 
     if mode == "describe":
