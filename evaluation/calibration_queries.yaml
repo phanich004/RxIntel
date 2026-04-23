@@ -1,0 +1,24 @@
+# Phase A calibration set — 2 queries only.
+#
+# Purpose: measure Anthropic token usage per query before committing to a
+# 50-query Phase B benchmark. Covers the two ends of retrieval cost:
+#   - ddi_check (graph-heavy, compact evidence)
+#   - describe  (vector-heavy, larger text chunks)
+#
+# Expected severity uses DrugBank-canonical labels.
+queries:
+  - id: cal_ddi_01
+    mode: ddi_check
+    query: "Is warfarin safe with aspirin?"
+    expected_drugs: ["DB00682", "DB00945"]
+    expected_mode: ddi_check
+    expected_severity: Moderate
+    ground_truth_source: DrugBank
+
+  - id: cal_describe_01
+    mode: describe
+    query: "What is the mechanism of action of semaglutide?"
+    expected_drugs: ["DB13928"]
+    expected_mode: describe
+    expected_severity: null
+    ground_truth_source: DrugBank

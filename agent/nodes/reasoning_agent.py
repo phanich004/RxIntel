@@ -34,9 +34,10 @@ import os
 from functools import lru_cache
 from typing import Any
 
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
 
+from agent import token_tracker
 from agent.prompts.reasoning_prompts import (
     REASONING_SYSTEM_PROMPTS,
     REVISION_INSTRUCTION_TEMPLATE,
@@ -46,7 +47,7 @@ from agent.schemas import AgentState, Mode, ReasoningOutput
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REASONING_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_REASONING_MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 2048
 MAX_EVIDENCE_TOKENS = 2500
 _TRUNCATION_FOOTER_TOKEN_HEADROOM = 20
@@ -60,17 +61,17 @@ _BLOCK_LABEL_OVERHEAD = 12
 _GRAPH_MODES: frozenset[str] = frozenset({"ddi_check", "polypharmacy", "hybrid"})
 _VECTOR_MODES: frozenset[str] = frozenset({"alternatives", "describe", "hybrid"})
 
-_client: ChatGroq | None = None
+_client: ChatAnthropic | None = None
 
 
-def _get_client() -> ChatGroq:
+def _get_client() -> ChatAnthropic:
     global _client
     if _client is None:
-        _client = ChatGroq(
+        _client = ChatAnthropic(  # type: ignore[call-arg]
             model=os.environ.get("REASONING_MODEL", DEFAULT_REASONING_MODEL),
             temperature=0,
             max_tokens=MAX_TOKENS,
-            model_kwargs={"response_format": {"type": "json_object"}},
+            default_request_timeout=60.0,
         )
     return _client
 
@@ -314,19 +315,39 @@ def _format_user_message(state: AgentState) -> str:
     return "\n\n".join(parts)
 
 
+def _strip_json_fence(text: str) -> str:
+    """Best-effort removal of ```json ... ``` wrappers Anthropic sometimes emits.
+
+    Groq's ``response_format={"type":"json_object"}`` forced plain JSON;
+    Anthropic has no equivalent so we defensively peel fences. Leaves
+    already-plain JSON unchanged.
+    """
+    t = text.strip()
+    if not t.startswith("```"):
+        return t
+    lines = t.splitlines()
+    # drop opening fence (possibly ```json)
+    lines = lines[1:]
+    # drop closing fence if present
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 @groq_retry
 def _invoke(system: str, user: str) -> str:
     client = _get_client()
     response = client.invoke(
         [SystemMessage(content=system), HumanMessage(content=user)]
     )
+    token_tracker.record("reasoning", response)
     content = response.content
     if isinstance(content, list):
         content = "".join(
             part if isinstance(part, str) else part.get("text", "")
             for part in content
         )
-    return str(content)
+    return _strip_json_fence(str(content))
 
 
 def reason(state: AgentState) -> ReasoningOutput:

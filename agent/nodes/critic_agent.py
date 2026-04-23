@@ -33,10 +33,11 @@ import logging
 import os
 from typing import Any, Final, cast
 
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_groq import ChatGroq
 
-from agent.nodes.reasoning_agent import _pack_evidence
+from agent import token_tracker
+from agent.nodes.reasoning_agent import _pack_evidence, _strip_json_fence
 from agent.prompts.critic_prompts import CRITIC_SYSTEM_PROMPT
 from agent.rate_limit import groq_retry
 from agent.schemas import AgentState, CriticOutput
@@ -56,20 +57,20 @@ APPROVAL_THRESHOLD: Final[float] = 0.75
 # earlier 3. ``retry_count`` is pre-incremented when the critic reads it.
 MAX_RETRIES: Final[int] = 2
 
-DEFAULT_CRITIC_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_CRITIC_MODEL = "claude-sonnet-4-6"
 CRITIC_MAX_TOKENS = 1024
 
-_client: ChatGroq | None = None
+_client: ChatAnthropic | None = None
 
 
-def _get_client() -> ChatGroq:
+def _get_client() -> ChatAnthropic:
     global _client
     if _client is None:
-        _client = ChatGroq(
+        _client = ChatAnthropic(  # type: ignore[call-arg]
             model=os.environ.get("CRITIC_MODEL", DEFAULT_CRITIC_MODEL),
             temperature=0,
             max_tokens=CRITIC_MAX_TOKENS,
-            model_kwargs={"response_format": {"type": "json_object"}},
+            default_request_timeout=60.0,
         )
     return _client
 
@@ -137,13 +138,14 @@ def _invoke(system: str, user: str) -> str:
     response = client.invoke(
         [SystemMessage(content=system), HumanMessage(content=user)]
     )
+    token_tracker.record("critic", response)
     content = response.content
     if isinstance(content, list):
         content = "".join(
             part if isinstance(part, str) else part.get("text", "")
             for part in content
         )
-    return str(content)
+    return _strip_json_fence(str(content))
 
 
 def judge(state: AgentState) -> CriticOutput:

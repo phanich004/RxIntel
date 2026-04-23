@@ -1,16 +1,20 @@
-"""Tenacity retry wrapper for Groq LLM calls.
+"""Tenacity retry wrapper for LLM calls (Groq + Anthropic).
 
-Groq free tier is ~30 req/min. An end-to-end graph run can touch the LLM
-up to ~8 times (router + 2 * 3 reasoning retries + final), so a single
-429 must not abort the pipeline. We retry on:
+Rate-limit shapes differ by provider but the retry policy is the same.
+A single 429 from either provider must not abort the pipeline, since an
+end-to-end graph run can touch the LLM up to ~8 times (router on Groq +
+2 * 3 reasoning retries + final on Anthropic). We retry on:
 
   * ``httpx.HTTPStatusError`` with status 429
   * ``groq.RateLimitError`` when the groq SDK is installed
+  * ``anthropic.RateLimitError`` and ``anthropic.APIStatusError`` with
+    status 429, when the anthropic SDK is installed
   * generic ``ConnectionError``
 
 Exponential backoff 2s -> 30s, capped at 5 attempts. ``reraise=True`` so
 the original exception surfaces after exhaustion instead of being wrapped
-in a ``RetryError``.
+in a ``RetryError``. The decorator is named ``groq_retry`` for historical
+reasons; it is provider-agnostic in practice.
 """
 
 from __future__ import annotations
@@ -25,6 +29,13 @@ try:
 except ImportError:  # pragma: no cover - groq is a transitive dep of langchain-groq
     _GroqRateLimit = None  # type: ignore[assignment,misc]
 
+try:
+    from anthropic import APIStatusError as _AnthropicStatusError
+    from anthropic import RateLimitError as _AnthropicRateLimit
+except ImportError:  # pragma: no cover - anthropic is a transitive dep of langchain-anthropic
+    _AnthropicRateLimit = None  # type: ignore[assignment,misc]
+    _AnthropicStatusError = None  # type: ignore[assignment,misc]
+
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -35,6 +46,14 @@ def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
         return True
     if _GroqRateLimit is not None and isinstance(exc, _GroqRateLimit):
+        return True
+    if _AnthropicRateLimit is not None and isinstance(exc, _AnthropicRateLimit):
+        return True
+    if (
+        _AnthropicStatusError is not None
+        and isinstance(exc, _AnthropicStatusError)
+        and getattr(exc, "status_code", None) == 429
+    ):
         return True
     return False
 
