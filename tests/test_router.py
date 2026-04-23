@@ -47,6 +47,7 @@ def _require_groq_key() -> None:
         pytest.skip("GROQ_API_KEY not set")
 
 
+@pytest.mark.skip(reason="live Groq call — run manually")
 @pytest.mark.parametrize(("query", "expected_mode"), ROUTER_GATE)
 def test_router_classification(query: str, expected_mode: str) -> None:
     resolved = entity_resolver({"query": query}).get("resolved_drugs", []) or []
