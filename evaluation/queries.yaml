@@ -49,7 +49,11 @@
   expected_severity: null
   expected_candidates: ["DB01211", "DB01026", "DB01167"]
   ground_truth_source: DrugBank
-  notes: "Clarithromycin, ketoconazole, itraconazole are canonical CYP3A4 inhibitors"
+  notes: |
+    Clarithromycin, ketoconazole, itraconazole are canonical CYP3A4 inhibitors.
+    Known retrieval limitation: hybrid mode's vector retriever underperforms
+    on enzyme-class queries. Expected recall@5 is low; this query tests whether
+    the pipeline reports the limitation honestly rather than hallucinating.
 
 - id: describe_01
   mode: describe

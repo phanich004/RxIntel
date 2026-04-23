@@ -78,6 +78,8 @@ CSV_COLUMNS = [
     "reasoning_out",
     "critic_in",
     "critic_out",
+    "router_in",
+    "router_out",
     "cost_usd",
     "cum_cost_usd",
 ]
@@ -193,7 +195,10 @@ def _run_one(spec: dict[str, Any], cum_cost: float) -> dict[str, Any]:
     usage = _sum_by_agent(token_tracker.records())
     _, r_in, r_out = usage.get("reasoning", (0, 0, 0))
     _, c_in, c_out = usage.get("critic", (0, 0, 0))
-    cost = _cost_usd(r_in + c_in, r_out + c_out)
+    # Router tokens are recorded only when ROUTER_PROVIDER=anthropic;
+    # .get default of zero means Groq-routed queries don't inflate cost.
+    _, rt_in, rt_out = usage.get("router", (0, 0, 0))
+    cost = _cost_usd(rt_in + r_in + c_in, rt_out + r_out + c_out)
 
     final = result.get("final_output") or {}
     critic = result.get("critic_score") or {}
@@ -230,6 +235,8 @@ def _run_one(spec: dict[str, Any], cum_cost: float) -> dict[str, Any]:
         "reasoning_out": r_out,
         "critic_in": c_in,
         "critic_out": c_out,
+        "router_in": rt_in,
+        "router_out": rt_out,
         "cost_usd": round(cost, 6),
         "cum_cost_usd": round(cum_cost + cost, 6),
     }
@@ -369,6 +376,33 @@ def _write_summary(
             f"| {r['retries']} | {r['elapsed_s']:.1f}s "
             f"| ${r['cost_usd']:.4f} |"
         )
+
+    lines.append("")
+    lines.append("## Known limitations")
+    lines.append("")
+    lines.append(
+        "- **Hybrid mode retrieval quality.** The pipeline combines a wide "
+        "graph filter (~350 drugs for an enzyme like CYP3A4, across all "
+        "actions) with vector retrieval over indication/contraindication "
+        "chunks. The router's semantic constraint (e.g. \"CYP3A4 inhibitor\") "
+        "does not semantically align with inhibitor-drug chunks, which "
+        "describe clinical use rather than enzyme role. Fixing this requires "
+        "(a) tightening the graph-filter to `action=inhibitor`, (b) enriching "
+        "chunk text at ETL with enzyme-role metadata, or (c) reformulating "
+        "the vector query. Deferred to a follow-up iteration."
+    )
+    lines.append("")
+    lines.append(
+        "- **Alternatives mode, rare indications.** Vector retrieval "
+        "post-filters to approved drugs (commit 1957e2b) so investigational "
+        "stubs no longer crowd out clinical candidates. Some highly "
+        "specific indications (e.g. argatroban for HIT) remain outside "
+        "top-5 because the per-chunk semantic concentration of short "
+        "competing chunks outweighs clinically-correct longer chunks. "
+        "Over-retrieving further (K>20) or using a cross-encoder re-rank "
+        "would likely fix this; out of scope for this benchmark."
+    )
+    lines.append("")
 
     SUMMARY_MD.parent.mkdir(parents=True, exist_ok=True)
     SUMMARY_MD.write_text("\n".join(lines) + "\n")
