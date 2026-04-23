@@ -34,25 +34,30 @@ banner in the UI.
  entity_resolver  (rapidfuzz → Med7 → FAISS fallback)
    │
    ▼
- query_router    (Llama-3.3-70B, JSON-only, temperature 0)
+ query_router    (Groq Llama-3.3-70B by default;
+                  ROUTER_PROVIDER=anthropic switches to Claude Sonnet 4.6)
    │
    ▼
  retrieval_dispatch
    │
    ├─► graph_retriever   (Neo4j, action-compatibility filter)
-   └─► vector_retriever  (ChromaDB, 5 collections, MiniLM embeddings)
+   └─► vector_retriever  (ChromaDB, 5 collections, MiniLM embeddings;
+                          alternatives mode post-filters to approved drugs)
            │
            ▼
        RRF fusion (k=60) for hybrid mode
            │
            ▼
- reasoning_agent (mode-aware prompts, evidence-grounded)
-           │
-           ▼
- critic_agent   (retry up to 2× on rejection, then escalate)
-           │
-           ▼
-       final_output
+ reasoning_agent (Anthropic Claude Sonnet 4.6, mode-aware prompts,
+                  evidence-grounded, schema-bound JSON output)
+   │
+   ▼
+ critic_agent   (Anthropic Claude Sonnet 4.6; weighted scoring:
+                 0.50 accuracy / 0.35 safety / 0.15 completeness;
+                 retry up to 2× on rejection, then escalate)
+   │
+   ▼
+ final_output
 ```
 
 Four services run under Docker Compose: **api** (FastAPI),
@@ -65,8 +70,11 @@ by the ETL step.
 - Docker Desktop (tested on Apple Silicon — `docker-compose.yml`
   pins `platform: linux/amd64` for the `api` and `streamlit` images)
 - Python 3.11+ (for one-time ETL and local development)
-- A [Groq API key](https://console.groq.com/keys) — free tier works,
-  daily limit ~100k tokens
+- An [Anthropic API key](https://console.anthropic.com/settings/keys) —
+  reasoning + critic agents run on Claude Sonnet 4.6 (~$0.04/query)
+- A [Groq API key](https://console.groq.com/keys) — free tier works for
+  the router, daily limit ~100k tokens. If exhausted, set
+  `ROUTER_PROVIDER=anthropic` to keep routing on Claude.
 - **A DrugBank XML dump** (`full_database.xml`, 2.4 GB). DrugBank's
   academic license prohibits redistribution; you must download it
   yourself from https://go.drugbank.com/releases/latest. Place it at
@@ -98,12 +106,19 @@ NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=<pick-a-password>
 NEO4J_DATABASE=neo4j
 
-# --- Groq ---
+# --- Anthropic (reasoning + critic always; router when ROUTER_PROVIDER=anthropic) ---
+ANTHROPIC_API_KEY=sk-ant-...
+REASONING_MODEL=claude-sonnet-4-6
+CRITIC_MODEL=claude-sonnet-4-6
+
+# --- Groq (router default) ---
 GROQ_API_KEY=gsk_...
 ROUTER_MODEL=llama-3.3-70b-versatile
-REASONING_MODEL=llama-3.3-70b-versatile
-CRITIC_MODEL=llama-3.3-70b-versatile
 GROQ_MIN_DELAY_MS=200
+
+# --- Router provider switch (default "groq"; "anthropic" for benchmark stability) ---
+ROUTER_PROVIDER=groq
+ROUTER_MODEL_ANTHROPIC=claude-sonnet-4-6
 
 # --- Agent tuning ---
 MAX_RETRIES=3
@@ -114,8 +129,8 @@ INSUFFICIENT_EVIDENCE_COSINE=0.60
 CHROMA_PERSIST_DIR=./chroma_db
 GAZETTEER_PATH=./gazetteer.pkl
 
-# --- MLflow ---
-MLFLOW_TRACKING_URI=http://localhost:5000
+# --- MLflow (host port 5001 — macOS AirPlay squats on 5000) ---
+MLFLOW_TRACKING_URI=http://localhost:5001
 
 # --- Demo mode (short-circuit to pre-seeded responses) ---
 DEMO_MODE=false
@@ -249,17 +264,44 @@ Type check:
 mypy --strict agent/ api/ etl/
 ```
 
+## Evaluation
+
+Two harnesses live under `evaluation/` and `scripts/`:
+
+```bash
+# Phase A — 2-query calibration: prove Anthropic billing + measure tokens/cost
+# before committing to a larger run.
+python scripts/calibrate_benchmark.py
+
+# Phase B — 50-query benchmark over evaluation/queries.yaml. Computes
+# routing_accuracy, severity F1, drug recall@5 (mode-aware: alt/hybrid
+# scored against expected_candidates, others against expected_drugs),
+# critic approval rate, and p50/p95 latency. Logs to MLflow experiment
+# rxintel-benchmark-v1. HARD aborts if cumulative spend crosses $5.
+python scripts/run_benchmark.py
+# or, when Groq's free-tier TPD is exhausted:
+ROUTER_PROVIDER=anthropic python scripts/run_benchmark.py
+```
+
+Results land at `evaluation/results.csv` (one row per query, full token
+breakdown per agent) and `evaluation/summary.md` (aggregate metrics +
+known-limitations notes).
+
 ## Project layout
 
 ```
-agent/          LangGraph pipeline — nodes, prompts, schemas, graph wiring
+agent/          LangGraph pipeline — nodes, prompts, schemas, graph wiring,
+                token tracker, provider-agnostic retry decorator
 api/            FastAPI service — /ask, /health, rate limiting, DEMO_MODE
 ui/             Streamlit app — components, styles, entry point
 etl/            One-time DrugBank loaders (Neo4j, ChromaDB, gazetteer)
-scripts/        Operational scripts (seed_demo.py)
-tests/          pytest suite
+scripts/        Operational scripts (seed_demo, calibrate_benchmark, run_benchmark)
+evaluation/     Phase A calibration set + Phase B 50-query template;
+                results.csv + summary.md land here after a benchmark run
+tests/          pytest suite (live LLM tests skipped by default)
 data/           DrugBank XML lives here (gitignored); demo_responses.json
                 is the one tracked artifact
+docs/           Architecture diagram (PNG + matplotlib script)
 docker-compose.yml   Four-service topology
 Dockerfile.api       Multi-stage build, CPU-only torch
 Dockerfile.streamlit Slim UI image
@@ -272,9 +314,11 @@ Dockerfile.streamlit Slim UI image
   on the host; if you still hit a collision, `lsof -nP -iTCP:5001
   -sTCP:LISTEN` to find and kill the squatter.
 - **`groq.RateLimitError 429 ... tokens per day`** — you've hit
-  Groq's free-tier 100k-token daily limit. Either wait (resets at
-  midnight Pacific) or flip `DEMO_MODE=true` and rebuild the api
-  image.
+  Groq's free-tier 100k-token daily limit. Three options: (a) wait
+  for the rolling 24h window to clear, (b) set
+  `ROUTER_PROVIDER=anthropic` to keep routing on Claude (~$0.005 per
+  router call), or (c) flip `DEMO_MODE=true` and rebuild the api
+  image for canned responses.
 - **`service "neo4j" has no container to start`** — a previous
   `docker compose down` removed the container. Use
   `docker compose up -d neo4j` to recreate it; `start` only resumes
