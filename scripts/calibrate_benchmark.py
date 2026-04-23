@@ -157,10 +157,20 @@ def run_one(spec: dict[str, Any]) -> dict[str, Any]:
 
     reasoning_calls, r_in, r_out = usage_by_agent.get("reasoning", (0, 0, 0))
     critic_calls, c_in, c_out = usage_by_agent.get("critic", (0, 0, 0))
+    router_calls, rt_in, rt_out = usage_by_agent.get("router", (0, 0, 0))
     r_cost = _cost_usd(r_in, r_out)
     c_cost = _cost_usd(c_in, c_out)
-    total_cost = r_cost + c_cost
+    rt_cost = _cost_usd(rt_in, rt_out)
+    total_cost = r_cost + c_cost + rt_cost
 
+    # Only print the router line when it actually recorded usage — when
+    # ROUTER_PROVIDER=groq (default) the router doesn't hit Anthropic and
+    # emits no tokens, so suppressing the zero row keeps output tidy.
+    if router_calls:
+        print(
+            f"  router:    calls={router_calls} "
+            f"in={rt_in:5d} out={rt_out:5d}  ${rt_cost:.4f}"
+        )
     print(
         f"  reasoning: calls={reasoning_calls} "
         f"in={r_in:5d} out={r_out:5d}  ${r_cost:.4f}"
@@ -178,14 +188,17 @@ def run_one(spec: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": qid,
         "mode": spec.get("expected_mode"),
+        "router_calls": router_calls,
+        "router_in": rt_in,
+        "router_out": rt_out,
         "reasoning_calls": reasoning_calls,
         "reasoning_in": r_in,
         "reasoning_out": r_out,
         "critic_calls": critic_calls,
         "critic_in": c_in,
         "critic_out": c_out,
-        "total_in": r_in + c_in,
-        "total_out": r_out + c_out,
+        "total_in": rt_in + r_in + c_in,
+        "total_out": rt_out + r_out + c_out,
         "cost_usd": total_cost,
         "elapsed_s": elapsed,
         "retries": int(result.get("retry_count", 0) or 0),

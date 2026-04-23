@@ -37,6 +37,25 @@ MODES
   describes a regimen / multiple medications / "my patient is on 5
   drugs" and asks for a review.
 
+DISAMBIGUATION
+--------------
+The ``drugs: [...]`` line lists drugs the resolver matched in the query
+text. Resolution is fuzzy and can produce FALSE POSITIVES — ordinary
+words ("mechanism", "action") sometimes match drug names ≥85% similarity
+and end up in the list. Read the QUERY TEXT itself when picking mode,
+not just the drug list.
+
+- If the query text NAMES exactly one drug AND asks about mechanism,
+  action, indication, pharmacodynamics, description, or "what is X" /
+  "how does X work" — the mode is ALWAYS ``describe``, regardless of
+  how many IDs the resolver returned.
+- ``polypharmacy`` requires the query TEXT to explicitly name multiple
+  drugs OR use regimen language ("patient is taking…", "regimen of…",
+  "her medications include…"). A long ``drugs: [...]`` list alone is
+  NOT a polypharmacy signal.
+- ``ddi_check`` requires the query TEXT to name (or clearly imply) two
+  specific drugs being combined.
+
 OUTPUT SCHEMA
 -------------
 {
@@ -69,6 +88,10 @@ drugs: []
 Q: What is the mechanism of action of semaglutide?
 drugs: [DB13928]
 {"mode": "describe", "confidence": 0.97}
+
+Q: What is the mechanism of action of semaglutide?
+drugs: [DB00281, DB14487, DB13928]
+{"mode": "describe", "confidence": 0.95}
 
 Q: Patient is taking warfarin, metformin, atorvastatin, omeprazole, and clopidogrel. Any concerns?
 drugs: [DB00682, DB00331, DB01076, DB00338, DB00758]
