@@ -37,7 +37,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent import token_tracker
-from agent.nodes.reasoning_agent import _pack_evidence, _strip_json_fence
+from agent.nodes.reasoning_agent import _extract_json, _pack_evidence
 from agent.prompts.critic_prompts import CRITIC_SYSTEM_PROMPT
 from agent.rate_limit import groq_retry
 from agent.schemas import AgentState, CriticOutput
@@ -145,7 +145,7 @@ def _invoke(system: str, user: str) -> str:
             part if isinstance(part, str) else part.get("text", "")
             for part in content
         )
-    return _strip_json_fence(str(content))
+    return _extract_json(str(content))
 
 
 def judge(state: AgentState) -> CriticOutput:

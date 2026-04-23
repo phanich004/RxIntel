@@ -315,23 +315,81 @@ def _format_user_message(state: AgentState) -> str:
     return "\n\n".join(parts)
 
 
-def _strip_json_fence(text: str) -> str:
-    """Best-effort removal of ```json ... ``` wrappers Anthropic sometimes emits.
+def _extract_json(text: str) -> str:
+    """Extract a JSON object from Claude output that may wrap it in prose.
 
-    Groq's ``response_format={"type":"json_object"}`` forced plain JSON;
-    Anthropic has no equivalent so we defensively peel fences. Leaves
-    already-plain JSON unchanged.
+    Groq's ``response_format={"type":"json_object"}`` forced plain JSON.
+    Anthropic has no equivalent so the critic/reasoning prompts rely on
+    the model to "respond with JSON". At ``temperature=0`` this is
+    usually clean, but occasionally Claude prefixes a sentence or wraps
+    the output in a `````json`` fence, which crashes
+    ``json.loads`` at column 0. This helper handles:
+
+    * plain JSON: ``{"foo": 1}``
+    * fenced JSON: `````json\\n{"foo": 1}\\n`````
+    * prose prefix: ``Here is the analysis:\\n\\n{"foo": 1}``
+    * prose suffix: ``{"foo": 1}\\n\\nNote: draft.``
+    * a false-positive ``{`` earlier in the prose that isn't a JSON object
+
+    Returns the raw extracted text. If nothing valid is found the
+    unchanged input is returned so the caller's ``json.loads`` raises
+    the canonical ``JSONDecodeError`` at the original offset.
     """
     t = text.strip()
-    if not t.startswith("```"):
-        return t
-    lines = t.splitlines()
-    # drop opening fence (possibly ```json)
-    lines = lines[1:]
-    # drop closing fence if present
-    if lines and lines[-1].strip().startswith("```"):
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
+
+    # Peel ```json / ``` fences first.
+    if t.startswith("```"):
+        lines = t.splitlines()[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        t = "\n".join(lines).strip()
+
+    # Fast path: already clean top-level JSON object.
+    if t.startswith("{") and t.endswith("}"):
+        try:
+            json.loads(t)
+            return t
+        except json.JSONDecodeError:
+            pass  # fall through to balanced-brace scan
+
+    # Slow path: scan for a balanced ``{...}`` block. TEMP diagnostic log
+    # — we want to measure how often Claude produces non-trivial wrapping
+    # during Phase B so we know whether structured_output is worth the
+    # migration cost. Remove after Day 5-6 decision.
+    logger.warning("_extract_json: bracket-matching path used (len=%d)", len(t))
+
+    start = t.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(t)):
+            ch = t[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\" and in_string:
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = t[start : i + 1]
+                    try:
+                        json.loads(candidate)
+                        return candidate
+                    except json.JSONDecodeError:
+                        break  # this candidate was junk, try the next '{'
+        start = t.find("{", start + 1)
+
+    return t
 
 
 @groq_retry
@@ -347,7 +405,7 @@ def _invoke(system: str, user: str) -> str:
             part if isinstance(part, str) else part.get("text", "")
             for part in content
         )
-    return _strip_json_fence(str(content))
+    return _extract_json(str(content))
 
 
 def reason(state: AgentState) -> ReasoningOutput:

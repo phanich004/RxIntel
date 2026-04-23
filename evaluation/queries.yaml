@@ -1,0 +1,76 @@
+# 50 queries total, 10 per mode. Below are 5 examples of expected format —
+# one per mode. User manually fills in the remaining 45 from clinical
+# references (DrugBank labels, primary literature, clinical guidelines).
+#
+# Schema
+# ------
+#   id                 : short stable identifier, e.g. "ddi_01"
+#   mode               : one of {ddi_check, alternatives, hybrid, describe, polypharmacy}
+#   query              : natural-language clinician question
+#   expected_drugs     : list of DrugBank IDs that should appear in the result
+#                        (via entity_resolver or retrieval). Used for drug_recall_at_5.
+#   expected_mode      : mode the router SHOULD pick (usually == mode)
+#   expected_severity  : DrugBank-canonical severity for ddi_check / polypharmacy;
+#                        null for describe / alternatives / hybrid
+#   expected_candidates: list of DrugBank IDs expected to surface as alternatives
+#                        or hybrid-filter matches; null when not applicable
+#   ground_truth_source: where the labels come from (e.g. "DrugBank", "UpToDate")
+#   notes              : free-form rationale for the expected answer
+
+- id: ddi_01
+  mode: ddi_check
+  query: "Is simvastatin safe with clarithromycin?"
+  expected_drugs: ["DB00641", "DB01211"]
+  expected_mode: ddi_check
+  expected_severity: Moderate
+  expected_candidates: null
+  ground_truth_source: DrugBank
+  notes: |
+    Clarithromycin is a potent CYP3A4 inhibitor; simvastatin is a CYP3A4 substrate.
+    DrugBank INTERACTS_WITH edge severity = "Moderate" (verified via Cypher
+    on DB00641<-[r:INTERACTS_WITH]->DB01211). Clinically this pair is often
+    flagged Major elsewhere, but DrugBank source text is the ground truth here.
+
+- id: alt_01
+  mode: alternatives
+  query: "What can I use instead of warfarin for a patient with HIT?"
+  expected_drugs: ["DB00682"]
+  expected_mode: alternatives
+  expected_severity: null
+  expected_candidates: ["DB00001", "DB00278", "DB00006"]
+  ground_truth_source: DrugBank
+  notes: "Direct thrombin inhibitors are FDA-labeled for HIT"
+
+- id: hybrid_01
+  mode: hybrid
+  query: "Which CYP3A4 inhibitors interact with statins?"
+  expected_drugs: []
+  expected_mode: hybrid
+  expected_severity: null
+  expected_candidates: ["DB01211", "DB01026", "DB01167"]
+  ground_truth_source: DrugBank
+  notes: "Clarithromycin, ketoconazole, itraconazole are canonical CYP3A4 inhibitors"
+
+- id: describe_01
+  mode: describe
+  query: "What is the mechanism of action of semaglutide?"
+  expected_drugs: ["DB13928"]
+  expected_mode: describe
+  expected_severity: null
+  expected_candidates: null
+  ground_truth_source: DrugBank
+  notes: "GLP-1 receptor agonist"
+
+- id: poly_01
+  mode: polypharmacy
+  query: "Patient is taking warfarin, aspirin, clopidogrel, omeprazole, and metformin. Any concerns?"
+  expected_drugs: ["DB00682", "DB00945", "DB00758", "DB00338", "DB00331"]
+  expected_mode: polypharmacy
+  expected_severity: [Major, Moderate]
+  expected_candidates: null
+  ground_truth_source: DrugBank
+  notes: |
+    Multiple bleeding-risk pairs. The pipeline rolls pair severities into a
+    single worst-case label; DrugBank edges in this regimen are a mix of
+    Moderate and Major, so the expected label is a set rather than a single
+    value. F1 uses "Major" as the canonical first-choice label.
