@@ -44,7 +44,8 @@ services:
       - mlflow_db:/mlflow-db
       - mlflow_artifacts:/mlflow-artifacts
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1"]
+      # mlflow image ships python but no curl/wget — use urllib.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health', timeout=3).status==200 else 1)\" || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 6
