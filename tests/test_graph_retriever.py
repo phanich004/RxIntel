@@ -136,14 +136,12 @@ def test_multi_hop_substrate_only_pair_returns_empty() -> None:
     assert ms < 1000.0
 
 
-def test_graph_retriever_dispatch_ddi_check_falls_back_to_multi_hop() -> None:
-    """If DIRECT is empty for two drugs but they share an action-
-    compatible enzyme path, the node should surface the MULTI_HOP rows
-    and label them query_type=multi_hop. Use the anti-pair inverted: a
-    pair with NO direct edge but WITH action-compatible enzyme
-    chemistry. Using Clarithromycin (inhibitor) + Dofetilide (substrate)
-    of CYP3A4 — known interacting pair, may or may not have a direct
-    edge depending on DrugBank coverage."""
+def test_graph_retriever_dispatch_ddi_check_surfaces_multi_hop() -> None:
+    """For two drugs that share an action-compatible enzyme path, the
+    ddi_check dispatch should surface MULTI_HOP rows with
+    query_type=multi_hop. Clarithromycin (inhibitor) + Dofetilide
+    (substrate) of CYP3A4 — may or may not have a direct edge depending
+    on DrugBank coverage; MULTI_HOP rows should appear either way."""
     state_update = graph_retriever(
         {
             "query": "x",
@@ -157,3 +155,24 @@ def test_graph_retriever_dispatch_ddi_check_falls_back_to_multi_hop() -> None:
     if results:
         labels = {r["query_type"] for r in results}
         assert labels.issubset({"direct", "multi_hop"})
+
+
+def test_graph_retriever_dispatch_ddi_check_augments_direct_with_multi_hop() -> None:
+    """Polish: when DIRECT rows exist for a 2-drug ddi_check AND the
+    pair also shares an action-compatible enzyme path, the dispatch
+    should return BOTH lineages so the reasoning agent has PK mechanism
+    context alongside the explicit INTERACTS_WITH severity. Simvastatin
+    + Clarithromycin is the canonical both-paths pair (see
+    test_direct_simvastatin_clarithromycin and
+    test_multi_hop_simvastatin_clarithromycin_fires_action_filter)."""
+    state_update = graph_retriever(
+        {
+            "query": "x",
+            "mode": "ddi_check",
+            "resolved_drugs": _resolved(SIMVASTATIN, CLARITHROMYCIN),
+        }
+    )
+    results = state_update["graph_results"]
+    labels = {r["query_type"] for r in results}
+    assert "direct" in labels, f"expected direct rows, got labels={labels}"
+    assert "multi_hop" in labels, f"expected multi_hop rows, got labels={labels}"

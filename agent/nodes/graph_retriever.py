@@ -2,11 +2,16 @@
 
 Three dispatch branches keyed off ``state["mode"]``:
 
-* ``ddi_check``   — DIRECT first; if zero rows, fall back to MULTI_HOP
-                    so inhibitor↔substrate paths still surface when no
-                    explicit INTERACTS_WITH edge was recorded.
-* ``polypharmacy`` — DIRECT only, all pairs. No MULTI_HOP fallback (we
-                     want a clean pairwise matrix, not enzyme lore).
+* ``ddi_check``   — DIRECT + MULTI_HOP (augmented, not fallback) when
+                    exactly two drugs are resolved. DIRECT rows carry
+                    the explicit INTERACTS_WITH severity+description;
+                    MULTI_HOP rows add enzyme-level mechanism context
+                    (e.g. "X is a CYP3A4 inhibitor, Y is a CYP3A4
+                    substrate"). Both lineages help the reasoning agent
+                    explain PK mechanism, not just the outcome. For a
+                    single drug or >2 drugs we run DIRECT only.
+* ``polypharmacy`` — DIRECT only, all pairs. No MULTI_HOP augmentation
+                     (we want a clean pairwise matrix, not enzyme lore).
 * ``hybrid``      — ENZYME_FILTER using state["graph_filter"].
 * ``alternatives`` / ``describe`` — no-op; the vector retriever owns
                      these modes.
@@ -159,8 +164,11 @@ def graph_retriever(state: AgentState) -> AgentState:
 
     if mode == "ddi_check":
         results = query_direct(drug_ids)
-        if not results and len(drug_ids) == 2:
-            results = query_multi_hop(drug_ids[0], drug_ids[1])
+        # Augment DIRECT with MULTI_HOP when exactly two drugs are
+        # resolved. Row-level query_type ("direct"|"multi_hop") keeps
+        # lineage distinguishable downstream.
+        if len(drug_ids) == 2:
+            results = results + query_multi_hop(drug_ids[0], drug_ids[1])
         return {"graph_results": results}
 
     if mode == "polypharmacy":
